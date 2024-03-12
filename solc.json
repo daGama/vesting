@@ -1,0 +1,5 @@
+{   
+  "remappings": [ 
+    "@openzeppelin/=/share/node_modules/@openzeppelin/"
+  ]
+}

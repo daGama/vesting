@@ -1,0 +1,9 @@
+{
+  "remappings": [
+    "@=node_modules/@"
+  ],
+  "optimizer": {
+    "enabled": true,
+    "runs": 200
+  }
+}
