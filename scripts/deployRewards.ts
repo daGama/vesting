@@ -1,47 +1,35 @@
 import { ethers } from "hardhat";
-import { CONFIG } from "./arguments";
+import { CONFIG } from "./argumentsRewards";
 const { prod: DEPLOY_CONFIG } = CONFIG;
 
 async function main() {
   const {
     owner,
     startRoundIncrement,
-    cliffDuration,
-    vestingDuration,
-    tgep,
     cap,
     tokenContract,
-    treasure,
   } = DEPLOY_CONFIG;
 
   const startRound = Math.floor(Date.now() / 1000) + startRoundIncrement;
   console.log('Deploy params: ', {
     owner,
     startRound,
-    cliffDuration,
-    vestingDuration,
-    tgep,
     cap,
     tokenContract,
-    treasure,
   });
   console.log(`For verify replace in arguments startRoundIncrement with ${startRound}`);
 
-  const Vesting = await ethers.deployContract("Vesting", [
+  const RewardsPool = await ethers.deployContract("RewardsPool", [
     owner,
     startRound,
-    cliffDuration,
-    vestingDuration,
-    tgep,
     cap,
     tokenContract,
-    treasure,
   ]);
 
-  await Vesting.waitForDeployment();
+  await RewardsPool.waitForDeployment();
 
   console.log(
-    `Vesting deployed to ${Vesting.target}`
+    `RewardsPool deployed to ${RewardsPool.target}`
   );
 }
 

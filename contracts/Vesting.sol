@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract Vesting is AccessControl, ReentrancyGuard {
+contract Vesting is Ownable, ReentrancyGuard {
     // events
     event TokenReserved(address indexed beneficiary, uint256 value);
     event TokenClaimed(address indexed beneficiary, uint256 value);
     event FundsWithdrawal(uint256 value);
-    // ROLES
-    // embedded role - DEFAULT_ADMIN_ROLE
-    bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
     // PV
     // start round unix timestamp
     uint256 private immutable _startRound;
@@ -57,6 +54,7 @@ contract Vesting is AccessControl, ReentrancyGuard {
     }
 
     constructor(
+        address initialOwner,
         uint256 startRound_,
         uint256 cliffDuration_,
         uint256 vestingDuration_,
@@ -64,21 +62,17 @@ contract Vesting is AccessControl, ReentrancyGuard {
         uint256 cap_,
         address token_,
         address payable treasury_
-    ) {
+    ) Ownable(initialOwner) {
         require(
             block.timestamp < startRound_,
             "start round timestamp can't be in the past"
         );
         require(vestingDuration_ > 0, "invalid vesting period duration");
+        require(cliffDuration_ > 0, "invalid cliff period duration");
         require(cap_ > 0, "invalid cap amount");
         require((tgep_ <= 10_000), "invalid rate");
         require(token_ != address(0), "invalid token address");
         require(treasury_ != address(0), "invalid treasury address");
-
-        // grant default admin role to contract owner
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        // grant admin role to contract owner
-        _grantRole(MANAGER_ROLE, msg.sender);
 
         _token = IERC20(token_);
 
@@ -253,7 +247,7 @@ contract Vesting is AccessControl, ReentrancyGuard {
     function reserveTokens(
         address beneficiary,
         uint256 amount
-    ) public onlyRole(MANAGER_ROLE) {
+    ) public onlyOwner {
         require(
             block.timestamp < (vestingTimestamp() + _vestingPeriod),
             "round finished"
@@ -272,7 +266,7 @@ contract Vesting is AccessControl, ReentrancyGuard {
     /**
      * @dev withdraw unpurchased funds
      */
-    function withdrawUnpurchasedFunds() public onlyRole(DEFAULT_ADMIN_ROLE) {
+    function withdrawUnpurchasedFunds() public onlyOwner {
         require(
             block.timestamp > (vestingTimestamp() + _vestingPeriod),
             "round has not finished yet"

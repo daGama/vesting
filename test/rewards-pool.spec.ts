@@ -9,28 +9,28 @@ import {
   TestRewardsPool,
 } from '../typechain-types';
 import { MaxUint256 } from 'ethers';
-import { soliditySha3 } from 'web3-utils';
-import { CONFIG } from '../scripts/arguments';
+import { CONFIG } from '../scripts/argumentsRewards';
 const { test: DEPLOY_CONFIG} = CONFIG;
 
 const ERC20_TOKEN_BALANCE = 1e8;
 
-describe("Vesting contract", function () {
+describe("Rewards pool contract", function () {
   async function deploy(this: any) {
     const {
       startRoundIncrement = DEPLOY_CONFIG.startRoundIncrement || 0, 
       cap = DEPLOY_CONFIG.cap || 0,
     } = this;
 
-    const [owner, user] = await ethers.getSigners();
+    const [owner, user, multisigOwner] = await ethers.getSigners();
 
     const ercFactory = await ethers.getContractFactory('MockERC20Token');
-    const tokenERC20: MockERC20Token = await ercFactory.deploy('DAGAMA Token', 'DAGAMA', ERC20_TOKEN_BALANCE);
+    const tokenERC20: MockERC20Token = await ercFactory.deploy('DAGAMAToken', 'UMP', ERC20_TOKEN_BALANCE);
     await tokenERC20.waitForDeployment();
 
     const factory = await ethers.getContractFactory('TestRewardsPool');
 
     const rewardsPool: TestRewardsPool = await factory.deploy(
+      multisigOwner,
       Math.floor(Date.now() / 1000) + startRoundIncrement,
       cap,
       tokenERC20.target
@@ -41,14 +41,12 @@ describe("Vesting contract", function () {
     await tokenERC20.approve(owner, MaxUint256);
     await tokenERC20.transfer(rewardsPool.target, cap);
 
-    const managerRole = soliditySha3('MANAGER_ROLE')!;
-
     return {
       rewardsPool,
       tokenERC20,
       owner,
       user,
-      managerRole
+      multisigOwner
     };
   }
 
@@ -60,11 +58,11 @@ describe("Vesting contract", function () {
     it("Should reserve funds", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { rewardsPool, tokenERC20, owner, user } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { rewardsPool, tokenERC20, owner, user, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(rewardsPool.target, MaxUint256);
       const vestingAmount = 1e4;
-      await rewardsPool.reserveTokens(owner, vestingAmount);
+      await rewardsPool.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       await mine(10);
 
@@ -77,30 +75,30 @@ describe("Vesting contract", function () {
       const availableForPurchase = await rewardsPool.availableForPurchase();
       expect(availableForPurchase).to.equal(cap - vestingAmount);
 
-      await expect(rewardsPool.reserveTokens(user, vestingAmount)).to.emit(rewardsPool, "TokenReserved").withArgs(user, vestingAmount);
+      await expect(rewardsPool.connect(multisigOwner).reserveTokens(user, vestingAmount)).to.emit(rewardsPool, "TokenReserved").withArgs(user, vestingAmount);
     });
 
     it("Should fail reserve with cap exceeded", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { rewardsPool, tokenERC20, owner, user } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { rewardsPool, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(rewardsPool.target, MaxUint256);
       const vestingAmount = 2e10;
-      await expect(rewardsPool.reserveTokens(owner, vestingAmount)).to.be.revertedWith('cap exceeded');
+      await expect(rewardsPool.connect(multisigOwner).reserveTokens(owner, vestingAmount)).to.be.revertedWith('cap exceeded');
     });
 
     it("Should claim reward", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { rewardsPool, tokenERC20, owner, user } = await loadFixture(deploy.bind({
+      const { rewardsPool, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({
          cap, 
          startRoundIncrement, 
         }));
       
       await tokenERC20.approve(rewardsPool.target, MaxUint256);
       const vestingAmount = 1e6;
-      await rewardsPool.reserveTokens(owner, vestingAmount);
+      await rewardsPool.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       const claimableForUserBefore = await rewardsPool.claimableForUser(owner.address);
       expect(claimableForUserBefore).to.equal(0);
@@ -157,11 +155,11 @@ describe("Vesting contract", function () {
     it("Should fail claim with insufficient funds", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { rewardsPool, tokenERC20, owner, user } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { rewardsPool, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(rewardsPool.target, MaxUint256);
       const vestingAmount = 2e5;
-      await rewardsPool.reserveTokens(owner, vestingAmount);
+      await rewardsPool.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       await expect(rewardsPool.claim(vestingAmount + 1)).to.be.revertedWith('insufficient funds');
     });
@@ -171,17 +169,16 @@ describe("Vesting contract", function () {
     it("Should grant manager role", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { rewardsPool, tokenERC20, owner, user, managerRole } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { rewardsPool, tokenERC20, owner, user, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(rewardsPool.target, MaxUint256);
       const vestingAmount = 2e4;
 
       await expect(rewardsPool.connect(user).reserveTokens(owner, vestingAmount))
-        .to.be.revertedWithCustomError(rewardsPool, 'AccessControlUnauthorizedAccount');
+        .to.be.revertedWithCustomError(rewardsPool, 'OwnableUnauthorizedAccount');
 
-      // grant role
-      await rewardsPool.grantRole(managerRole, user);
-      await rewardsPool.reserveTokens(owner, vestingAmount);
+      // connect multisig wallet
+      await rewardsPool.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       const purchasedByUser = await rewardsPool.purchasedByUser(owner.address);
       expect(purchasedByUser).to.equal(vestingAmount);

@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract RewardsPool is AccessControl, ReentrancyGuard {
+contract RewardsPool is Ownable, ReentrancyGuard {
     // events
     event TokenReserved(address indexed beneficiary, uint256 value);
     event TokenClaimed(address indexed beneficiary, uint256 value);
     event FundsWithdrawal(uint256 value);
-    // ROLES
-    // embedded role - DEFAULT_ADMIN_ROLE
-    bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
     // PV
     // start  unix timestamp
     uint256 private immutable _start;
@@ -23,7 +20,6 @@ contract RewardsPool is AccessControl, ReentrancyGuard {
     uint256 private _purchased;
     // the token being sold
     IERC20 private immutable _token;
-
     /**
      * @dev wallet structure for collecting benefeciary purchased/claimed amounts
      */
@@ -46,21 +42,17 @@ contract RewardsPool is AccessControl, ReentrancyGuard {
     }
 
     constructor(
+        address initialOwner,
         uint256 start_,
         uint256 cap_,
         address token_
-    ) {
+    ) Ownable(initialOwner) {
         require(
             block.timestamp < start_,
             "start  timestamp can't be in the past"
         );
         require(cap_ > 0, "invalid cap amount");
         require(token_ != address(0), "invalid token address");
-
-        // grant default admin role to contract owner
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        // grant admin role to contract owner
-        _grantRole(MANAGER_ROLE, msg.sender);
 
         _token = IERC20(token_);
 
@@ -220,7 +212,7 @@ contract RewardsPool is AccessControl, ReentrancyGuard {
     function reserveTokens(
         address beneficiary,
         uint256 amount
-    ) public onlyRole(MANAGER_ROLE) {
+    ) public onlyOwner {
         require((allPurchased() + amount) <= cap(), "cap exceeded");
 
         _purchased += amount;

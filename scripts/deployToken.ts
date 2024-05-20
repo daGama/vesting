@@ -1,7 +1,19 @@
 import { ethers } from "hardhat";
+import { CONFIG } from "./argumentsToken";
+const { prod: DEPLOY_CONFIG } = CONFIG;
 
 async function main() {
-  const Token = await ethers.deployContract("DAGAMAToken", []);
+  const {
+    owner,
+    totalSupply
+  } = DEPLOY_CONFIG;
+
+  console.log('Deploy params: ', {
+    owner,
+    totalSupply
+  });
+
+  const Token = await ethers.deployContract("DAGAMAToken", [owner, totalSupply]);
 
   await Token.waitForDeployment();
 

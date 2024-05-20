@@ -5,6 +5,7 @@ import {Vesting} from "../Vesting.sol";
 
 contract TestVesting is Vesting {
     constructor(
+        address initialOwner,
         uint startRound_,
         uint cliffDuration_,
         uint vestingDuration_,
@@ -14,6 +15,7 @@ contract TestVesting is Vesting {
         address payable treasury_
     )
         Vesting(
+            initialOwner,
             startRound_,
             cliffDuration_,
             vestingDuration_,

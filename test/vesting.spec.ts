@@ -9,7 +9,6 @@ import {
   Vesting,
 } from '../typechain-types';
 import { MaxUint256 } from 'ethers';
-import { soliditySha3 } from 'web3-utils';
 import { CONFIG } from '../scripts/arguments';
 const { test: DEPLOY_CONFIG} = CONFIG;
 
@@ -25,15 +24,16 @@ describe("Vesting contract", function () {
       cap = DEPLOY_CONFIG.cap || 0,
     } = this;
 
-    const [owner, user, treasure] = await ethers.getSigners();
+    const [owner, user, treasure, multisigOwner] = await ethers.getSigners();
 
     const ercFactory = await ethers.getContractFactory('MockERC20Token');
-    const tokenERC20: MockERC20Token = await ercFactory.deploy('DAGAMA Token', 'DAGAMA', ERC20_TOKEN_BALANCE);
+    const tokenERC20: MockERC20Token = await ercFactory.deploy('DAGAMAToken', 'UMP', ERC20_TOKEN_BALANCE);
     await tokenERC20.waitForDeployment();
 
     const factory = await ethers.getContractFactory('Vesting');
 
     const vesting: Vesting = await factory.deploy(
+      multisigOwner,
       Math.floor(Date.now() / 1000) + startRoundIncrement,
       cliffDuration,
       vestingDuration,
@@ -48,15 +48,13 @@ describe("Vesting contract", function () {
     await tokenERC20.approve(owner, MaxUint256);
     await tokenERC20.transfer(vesting.target, cap);
 
-    const managerRole = soliditySha3('MANAGER_ROLE')!;
-
     return {
       vesting,
       tokenERC20,
       owner,
       user,
       treasure,
-      managerRole
+      multisigOwner
     };
   }
 
@@ -68,11 +66,11 @@ describe("Vesting contract", function () {
     it("Should reserve funds", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { vesting, tokenERC20, owner, user } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { vesting, tokenERC20, owner, user, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e4;
-      await vesting.reserveTokens(owner, vestingAmount);
+      await vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       await mine(10);
 
@@ -85,17 +83,17 @@ describe("Vesting contract", function () {
       const availableForPurchase = await vesting.availableForPurchase();
       expect(availableForPurchase).to.equal(cap - vestingAmount);
 
-      await expect(vesting.reserveTokens(user, vestingAmount)).to.emit(vesting, "TokenReserved").withArgs(user, vestingAmount);
+      await expect(vesting.connect(multisigOwner).reserveTokens(user, vestingAmount)).to.emit(vesting, "TokenReserved").withArgs(user, vestingAmount);
     });
 
     it("Should fail reserve with cap exceeded", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { vesting, tokenERC20, owner, user } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { vesting, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e10;
-      await expect(vesting.reserveTokens(owner, vestingAmount)).to.be.revertedWith('cap exceeded');
+      await expect(vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount)).to.be.revertedWith('cap exceeded');
     });
 
     it("Should fail reserve with round finished", async function () {
@@ -103,7 +101,7 @@ describe("Vesting contract", function () {
       const startRoundIncrement = 60;
       const cliffDuration = 600;
       const vestingDuration = 600;
-      const { vesting, tokenERC20, owner, user } = await loadFixture(deploy.bind({
+      const { vesting, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({
         cap, 
         startRoundIncrement, 
         cliffDuration,
@@ -116,7 +114,7 @@ describe("Vesting contract", function () {
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e10;
-      await expect(vesting.reserveTokens(owner, vestingAmount)).to.be.revertedWith('round finished');
+      await expect(vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount)).to.be.revertedWith('round finished');
     });
 
     it("Should claim reward", async function () {
@@ -124,7 +122,7 @@ describe("Vesting contract", function () {
       const startRoundIncrement = 60;
       const cliffDuration = 600;
       const vestingDuration = 600;
-      const { vesting, tokenERC20, owner, user } = await loadFixture(deploy.bind({
+      const { vesting, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({
          cap, 
          startRoundIncrement, 
          cliffDuration,
@@ -133,7 +131,7 @@ describe("Vesting contract", function () {
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e4;
-      await vesting.reserveTokens(owner, vestingAmount);
+      await vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       const claimableForUserBefore = await vesting.claimableForUser(owner.address);
       expect(claimableForUserBefore).to.equal(0);
@@ -160,7 +158,7 @@ describe("Vesting contract", function () {
     it("Should fail claim with account is not beneficiary", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { vesting, tokenERC20, owner, user } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { vesting, tokenERC20, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e10;
@@ -170,11 +168,11 @@ describe("Vesting contract", function () {
     it("Should fail claim with insufficient funds", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { vesting, tokenERC20, owner, user } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { vesting, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e5;
-      await vesting.reserveTokens(owner, vestingAmount);
+      await vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       await expect(vesting.claim(vestingAmount + 1)).to.be.revertedWith('insufficient funds');
     });
@@ -184,7 +182,7 @@ describe("Vesting contract", function () {
       const startRoundIncrement = 60;
       const cliffDuration = 600;
       const vestingDuration = 600;
-      const { vesting, tokenERC20, owner, user, treasure } = await loadFixture(deploy.bind({
+      const { vesting, tokenERC20, owner, user, treasure, multisigOwner } = await loadFixture(deploy.bind({
          cap, 
          startRoundIncrement, 
          cliffDuration,
@@ -193,7 +191,7 @@ describe("Vesting contract", function () {
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e4;
-      await vesting.reserveTokens(owner, vestingAmount);
+      await vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       await mine(cliffDuration + vestingDuration + startRoundIncrement, {
         interval: 1
@@ -204,11 +202,11 @@ describe("Vesting contract", function () {
 
       // failed withdraw by nonAdmin
       await expect(vesting.connect(user).withdrawUnpurchasedFunds())
-        .to.be.revertedWithCustomError(vesting, 'AccessControlUnauthorizedAccount');
+        .to.be.revertedWithCustomError(vesting, 'OwnableUnauthorizedAccount');
 
       // withdraw by admin
       const amount = new BigNumber(cap).minus(vestingAmount);
-      await expect(vesting.withdrawUnpurchasedFunds()).to.emit(vesting, "FundsWithdrawal").withArgs(amount);
+      await expect(vesting.connect(multisigOwner).withdrawUnpurchasedFunds()).to.emit(vesting, "FundsWithdrawal").withArgs(amount);
 
       // check balance after withdraw
       const balanceAfter = (await tokenERC20.balanceOf(treasure)).toString();
@@ -221,7 +219,7 @@ describe("Vesting contract", function () {
       const startRoundIncrement = 60;
       const cliffDuration = 600;
       const vestingDuration = 600;
-      const { vesting, tokenERC20, owner, user, treasure } = await loadFixture(deploy.bind({
+      const { vesting, tokenERC20, owner, multisigOwner } = await loadFixture(deploy.bind({
          cap, 
          startRoundIncrement, 
          cliffDuration,
@@ -230,11 +228,11 @@ describe("Vesting contract", function () {
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e4;
-      await vesting.reserveTokens(owner, vestingAmount);
+      await vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       await mine(10);
 
-      await expect(vesting.withdrawUnpurchasedFunds()).to.be.revertedWith('round has not finished yet');
+      await expect(vesting.connect(multisigOwner).withdrawUnpurchasedFunds()).to.be.revertedWith('round has not finished yet');
     });
   });
 
@@ -242,17 +240,16 @@ describe("Vesting contract", function () {
     it("Should grant manager role", async function () {
       const cap = 1e10;
       const startRoundIncrement = 60;
-      const { vesting, tokenERC20, owner, user, managerRole } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
+      const { vesting, tokenERC20, owner, user, multisigOwner } = await loadFixture(deploy.bind({ cap, startRoundIncrement }));
       
       await tokenERC20.approve(vesting.target, MaxUint256);
       const vestingAmount = 2e4;
 
       await expect(vesting.connect(user).reserveTokens(owner, vestingAmount))
-        .to.be.revertedWithCustomError(vesting, 'AccessControlUnauthorizedAccount');
+        .to.be.revertedWithCustomError(vesting, 'OwnableUnauthorizedAccount');
 
-      // grant role
-      await vesting.grantRole(managerRole, user);
-      await vesting.reserveTokens(owner, vestingAmount);
+      // connect multisig wallet
+      await vesting.connect(multisigOwner).reserveTokens(owner, vestingAmount);
 
       const purchasedByUser = await vesting.purchasedByUser(owner.address);
       expect(purchasedByUser).to.equal(vestingAmount);
