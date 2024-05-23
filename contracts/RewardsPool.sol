@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/governance/TimelockController.sol";
 
 contract RewardsPool is Ownable, ReentrancyGuard {
     // events
@@ -20,6 +21,9 @@ contract RewardsPool is Ownable, ReentrancyGuard {
     uint256 private _purchased;
     // the token being sold
     IERC20 private immutable _token;
+
+    TimelockController public timeLock;
+
     /**
      * @dev wallet structure for collecting benefeciary purchased/claimed amounts
      */
@@ -45,7 +49,8 @@ contract RewardsPool is Ownable, ReentrancyGuard {
         address initialOwner,
         uint256 start_,
         uint256 cap_,
-        address token_
+        address token_,
+        TimelockController timeLock_
     ) Ownable(initialOwner) {
         require(
             block.timestamp < start_,
@@ -59,6 +64,15 @@ contract RewardsPool is Ownable, ReentrancyGuard {
         _start = start_;
 
         _cap = cap_;
+        timeLock = timeLock_;
+    }
+
+    modifier onlyTimeLock() {
+        require(
+            msg.sender == address(timeLock),
+            "Can only be called by TimeLock"
+        );
+        _;
     }
 
     /**
@@ -212,12 +226,43 @@ contract RewardsPool is Ownable, ReentrancyGuard {
     function reserveTokens(
         address beneficiary,
         uint256 amount
-    ) public onlyOwner {
+    ) public onlyTimeLock {
         require((allPurchased() + amount) <= cap(), "cap exceeded");
 
         _purchased += amount;
         _balances[beneficiary].purchased += amount;
 
         emit TokenReserved(beneficiary, amount);
+    }
+
+    function scheduleReserveTokens(
+        address beneficiary,
+        uint256 amount
+    ) external onlyOwner {
+        bytes memory data = abi.encodeWithSignature(
+            "reserveTokens(address,uint256)",
+            beneficiary,
+            amount
+        );
+        timeLock.schedule(
+            address(this),
+            0,
+            data,
+            bytes32(0),
+            bytes32(0),
+            timeLock.getMinDelay()
+        );
+    }
+
+    function executeReserveTokens(
+        address beneficiary,
+        uint256 amount
+    ) external {
+        bytes memory data = abi.encodeWithSignature(
+            "reserveTokens(address,uint256)",
+            beneficiary,
+            amount
+        );
+        timeLock.execute(address(this), 0, data, bytes32(0), bytes32(0));
     }
 }

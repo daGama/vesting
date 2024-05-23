@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/governance/TimelockController.sol";
 
 contract Vesting is Ownable, ReentrancyGuard {
     // events
@@ -31,6 +32,8 @@ contract Vesting is Ownable, ReentrancyGuard {
     IERC20 private immutable _token;
     // treasury address
     address payable private immutable _treasury;
+
+    TimelockController public timeLock;
 
     /**
      * @dev ico wallet structure for collecting benefeciary purchased/claimed amounts
@@ -61,7 +64,8 @@ contract Vesting is Ownable, ReentrancyGuard {
         uint256 tgep_, // % in basis points (parts per 10,000)
         uint256 cap_,
         address token_,
-        address payable treasury_
+        address payable treasury_,
+        TimelockController timeLock_
     ) Ownable(initialOwner) {
         require(
             block.timestamp < startRound_,
@@ -84,6 +88,15 @@ contract Vesting is Ownable, ReentrancyGuard {
         _cap = cap_;
 
         _treasury = treasury_;
+        timeLock = timeLock_;
+    }
+
+    modifier onlyTimeLock() {
+        require(
+            msg.sender == address(timeLock),
+            "Can only be called by TimeLock"
+        );
+        _;
     }
 
     /**
@@ -221,8 +234,11 @@ contract Vesting is Ownable, ReentrancyGuard {
             return purchasedBalance - claimedBalance;
         }
 
-        uint256 period = currentTime > vestingTimestamp() ? currentTime - vestingTimestamp() : 0;
-        uint256 unlocked = (purchasedBalance - initiallyUnlocked) * period / _vestingPeriod;
+        uint256 period = currentTime > vestingTimestamp()
+            ? currentTime - vestingTimestamp()
+            : 0;
+        uint256 unlocked = ((purchasedBalance - initiallyUnlocked) * period) /
+            _vestingPeriod;
         return initiallyUnlocked + unlocked - claimedBalance;
     }
 
@@ -247,7 +263,7 @@ contract Vesting is Ownable, ReentrancyGuard {
     function reserveTokens(
         address beneficiary,
         uint256 amount
-    ) public onlyOwner {
+    ) public onlyTimeLock {
         require(
             block.timestamp < (vestingTimestamp() + _vestingPeriod),
             "round finished"
@@ -266,7 +282,7 @@ contract Vesting is Ownable, ReentrancyGuard {
     /**
      * @dev withdraw unpurchased funds
      */
-    function withdrawUnpurchasedFunds() public onlyOwner {
+    function withdrawUnpurchasedFunds() public onlyTimeLock {
         require(
             block.timestamp > (vestingTimestamp() + _vestingPeriod),
             "round has not finished yet"
@@ -283,5 +299,57 @@ contract Vesting is Ownable, ReentrancyGuard {
         }
 
         emit FundsWithdrawal(amount);
+    }
+
+    function scheduleReserveTokens(
+        address beneficiary,
+        uint256 amount
+    ) external onlyOwner {
+        bytes memory data = abi.encodeWithSignature(
+            "reserveTokens(address,uint256)",
+            beneficiary,
+            amount
+        );
+        timeLock.schedule(
+            address(this),
+            0,
+            data,
+            bytes32(0),
+            bytes32(0),
+            timeLock.getMinDelay()
+        );
+    }
+
+    function executeReserveTokens(
+        address beneficiary,
+        uint256 amount
+    ) external {
+        bytes memory data = abi.encodeWithSignature(
+            "reserveTokens(address,uint256)",
+            beneficiary,
+            amount
+        );
+        timeLock.execute(address(this), 0, data, bytes32(0), bytes32(0));
+    }
+
+    function scheduleWithdrawUnpurchasedFunds() external onlyOwner {
+        bytes memory data = abi.encodeWithSignature(
+            "withdrawUnpurchasedFunds()"
+        );
+        timeLock.schedule(
+            address(this),
+            0,
+            data,
+            bytes32(0),
+            bytes32(0),
+            timeLock.getMinDelay() * 4
+        );
+    }
+
+    function executeWithdrawUnpurchasedFunds() external {
+        bytes memory data = abi.encodeWithSignature(
+            "withdrawUnpurchasedFunds()"
+        );
+        timeLock.execute(address(this), 0, data, bytes32(0), bytes32(0));
     }
 }
